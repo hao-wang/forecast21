@@ -1,12 +1,13 @@
 /** @file fisher.c 
  * Hao Wang, 25.1.2013
  * Fisher driver of CLASS 
+ * Telescope parameters are for FAST
  */
  
 #include "class.h"
 
 #define NVARY 4 /* 4, dim of fisher matrix = NVARY x NVARY */
-#define NREDSHIFT 3 /* 8, number of time slices */
+#define NREDSHIFT 5 /* 8, number of time slices */
 #define ZMAX 2.0
 
 int set_fiducial(
@@ -94,13 +95,13 @@ count = 0;
   /* parameter of the telescope */
   double tele_fwhm0 = 2.9; /* angular resolution in minute degree, here for FAST */ 
   double tele_fwhm; /* angular resolution at z: tele_fwhm = tele_fwhm0*(1+z) */
-  double tele_temp_sys = 30.; /* system temperature in K; always mK in calculation */
+  double tele_temp_sys = 3.; /* system temperature in K; always mK in calculation */
   double tele_time_integ = 10.; /* integration time */
   double tele_freq = 1.e6; /* delta_nu in Hz; noise = temp_sys / sqrt(freq*time_integ) */
   double tele_fsky = 0.585;
 
   double noise_ins;
-  double noise_fg = 0.;
+  double noise_fg = 4.; /* RMS of the residual foreground noise, in mK */
   double theta_res, deltaN; 
   double tmp_cl_noise;
   double delta_N; 
@@ -160,7 +161,8 @@ count = 0;
     theta_res = tele_fwhm / sqrt(8*log(2));
     for (l=2; l<=lmax; l++) {
         tmp_cl_noise = pow(tele_fwhm*delta_N, 2) * exp(l*(l+1)*theta_res*theta_res);
-        var_cl[l] = 2./((2*l+1)*tele_fsky) * pow((10*psCl_fid[l]+tmp_cl_noise), 2);
+        var_cl[l] = 2./((2*l+1)*tele_fsky) * pow((psCl_fid[l]+tmp_cl_noise), 2); 
+    /* there was a factor of 10 before psCl_fid[l] in the above line, why?? */
     }
         
     for (i = 0; i<NVARY; i++) 
@@ -456,8 +458,8 @@ int vary_parameter(
     parser_read_double(pfc,pfc->name[ipara],&param1,&flag1,errmsg);
     param2 = param1 * (1.+delta);
     sprintf(pfc->value[ipara],"%e", param2);
-printf("<=====================================================>");
-    printf("%s from %e to %e\n", pfc->name[ipara], param1, param2);
+    printf("<=====================================================>");
+    printf("%s from %e to %e; z is now %f\n", pfc->name[ipara], param1, param2, z);
 
     /* calls class again for *renewed* fc and return the P(k)'s*/
     class_assuming_bessels_computed(pfc,ppr,pba,pth,ppt,pbs,ptr,ppm,psp,pnl,ple,pop,z,psCl1,lmax,errmsg);
