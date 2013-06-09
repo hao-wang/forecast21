@@ -1,0 +1,1 @@
+This code works in conjection with CLASS and produces Fisher matrix for wCDM model parameters. To use it, copy the directory forecast21/ into CLASS directory. Run "make -f forecast21/Makefile_fisher" in CLASS.
