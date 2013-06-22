@@ -1,21 +1,14 @@
 /** @file fisher.c
- * Hao Wang, 23.5.2013
- *  use Omega_HI instead of Omega_b*x_HI
- *  add l-interval;
- *  remove theta_res = tele_fwhm / sqrt(8*log(2)) and consider
- *      theta_res=2.9';
- * Hao Wang, 25.1.2013
- * Fisher driver of CLASS
- * Telescope parameters are for FAST
+ * Fisher driver of CLASS with FAST parameters
  */
 
 #include "class.h"
 
 #define NVARY 6 /* dim of fisher matrix = NVARY x NVARY */
-#define NREDSHIFT 21 /* (21-1 = ) 20 frequency intervals */
+#define NREDSHIFT 21 /* 21 - 1 = 20 frequency intervals */
 #define ZMAX 2.0
 #define ZMIN 0.5
-#define LMAX 2000 /* global l max, used in array dimensions */
+#define LMAX 2000 /* global l max, used for initialize arrays */
 
 /*char * trim(char *str);*/
     
@@ -95,17 +88,18 @@ int main() {
 
     int lmax, lmin;
     int l; /* l starts from 2 (quadrupole) in spectrum calculation, but
-              lmin for Fisher matrix */
+              starts from lmin in calculating Fisher matrix. */
 
-    double * psCl;  /*power spectrum in 2-D */
+    double * psCl;  /* power spectrum in 2-D */
     double * psCl_fid;
-    double * dCldPara[NVARY]; /* first derivatives, crucial for Fisher matrix */
-    double * var_cl; /* uncertainty of Cl's using a_lm as observables */
+    double * dCldPara[NVARY]; /* first derivatives: for Fisher matrix */
+    double * var_cl; /* uncertainty of Cl's */
 
     double z;
     int iz;
-    double khmax; /* use fitting formula to get smallest nonlinear kh, see 
-                   mathematica notebook for fast21 */
+    double khmax; /* We used fitting formula to get *smallest* nonlinear kh, or 
+                     the turning point from linear to nonlinear; see the paper or the
+                     accompanying mathematica notebook (please email me for it) for detail */
 
     double zs[NREDSHIFT];
     double pvecback[100];
@@ -113,11 +107,15 @@ int main() {
     double fisher[NVARY][NVARY]= {0};
 
     /* parameter of the telescope */
-    double tele_res0 = 2.9; /* also FWHM, angular resolution in minute degree, will be converted to radian */
+    double tele_res0 = 2.9; /* also FWHM, angular resolution in arc minute, 
+                               will be in the following converted to radian */
     double tele_res; /* angular resolution at z: tele_res = tele_res0*(1+z) */
     double tele_temp_sys = 20.; /* system temperature in K; always mK in calculation */
     double tele_time_pix; /* observation time per pixel, in [sec] */
-    double tele_freq = 0.2e6; /* delta_nu in Hz; noise = temp_sys / sqrt(freq*time_pix) */
+    double tele_freq = 0.2e6; /* delta_nu in Hz; [tele_] noise = temp_sys /
+                                 sqrt(freq*time_pix) */
+
+    //Two settings are considered in the paper. 
 /*
     double tele_time_tot = 8. ;//survey time in [yr] 
     int    tele_num_beam=100;
@@ -128,7 +126,9 @@ int main() {
     double tele_fsky = 0.0005;
 
     double noise_ins;
-    double noise_fg = 0.; /* RMS of the residual foreground noise, in mK */
+    double noise_fg = 0.; /* RMS of the residual foreground noise, in mK; currently 
+                             set to zero, meaning the foreground are all effectively
+                             cleaned */
     double deltaN;
     double tmp_cl_noise;
     double delta_N;
@@ -183,36 +183,32 @@ fp2=fopen("fsky_best.dat", "w");
         var_cl = malloc((lmax+1)*sizeof(double));
         for(i=0; i<NVARY; i++) dCldPara[i] = malloc((lmax+1)*sizeof(double));
 
-        /* calls class (except the bessel module which has been called
-         once and for all) and return the psCl[l]'s */
         class_assuming_bessels_computed(&fc,&pr,&ba,&th,&pt,&bs,&tr,&pm,&sp,&nl,&le,&op, \
                                         z,psCl_fid,lmin,lmax,errmsg);
 	for(i=lmin; i<=lmax; i+=10) printf("psCl_fid[%d] = %e\n", i, psCl_fid[i]); 
 
-        /* now, loop over parameters */
         for (i=0; i<NVARY; i++) {
-            /* vary parameter and get dCldPara[ipara][il]'s at redshift z; allocate
+            /* Vary each parameter and get dCldPara[ipara][il]'s at redshift z. Allocate
              * an array psCl first; psCl is used only inside the loop, so allocate
-             * and free inside */
+             * and free inside the loop. */
             psCl = malloc((lmax+1)*sizeof(double));
             vary_parameter(&fc,&pr,&ba,&th,&pt,&bs,&tr,&pm,&sp,&nl,&le,&op, \
                            z,psCl,psCl_fid,lmin,lmax,i,dCldPara[i],errmsg);
             free(psCl);
         }
 
-        /* get the value for instrument */
         tele_res=tele_res0 * (1+z);
         tele_time_pix=tele_time_tot * yr2sec * tele_num_beam * pow(tele_res,2) / (4*M_PI*tele_fsky);
-        /* radio equation in mK, in consistence with signal
-         * dimension */
+        /* Radio equation in mK, in consistence with signal
+         * dimension. */
         noise_ins = tele_temp_sys*1000. / sqrt(tele_freq*tele_time_pix);
 
         delta_N = noise_ins + noise_fg;
         for (l=lmin; l<=lmax; l++) {
             tmp_cl_noise = pow(tele_res,2) * pow(delta_N,2) * exp(l*(l+1) * pow(tele_res,2)/(8*log(2)));
             var_cl[l] = 2./((2*l+1)*tele_fsky) * pow(psCl_fid[l]+tmp_cl_noise, 2); //variance of cl
-            printf("noise vs signal: %f, %f\n", tmp_cl_noise,psCl_fid[l]);
-fbest[iz][l]=(tele_freq*tele_num_beam*tele_time_tot*yr2sec*psCl_fid[l])/(4*M_PI*pow(tele_temp_sys*1000.,2)*exp(l*(l+1) * pow(tele_res,2)/(8*log(2))));
+            printf("noise vs signal: %e, %e\n", tmp_cl_noise,psCl_fid[l]);
+            fbest[iz][l]=(tele_freq*tele_num_beam*tele_time_tot*yr2sec*psCl_fid[l])/(4*M_PI*pow(tele_temp_sys*1000.,2)*exp(l*(l+1) * pow(tele_res,2)/(8*log(2))));
         }
 
      if(NVARY != 0)
@@ -237,8 +233,9 @@ fbest[iz][l]=(tele_freq*tele_num_beam*tele_time_tot*yr2sec*psCl_fid[l])/(4*M_PI*
     for (i=0; i<NVARY; i++) {
         for (j=0; j<NVARY; j++) {
             printf("%20.10e ", fisher[i][j]);
-	    fprintf(fp, "%20.10e ", fisher[i][j]);
-	}
+	        fprintf(fp, "%20.10e ", fisher[i][j]);
+        }
+        printf("\n");
     	fprintf(fp, "\n");
     }
     for (i=0; i<NVARY; i++) fprintf(fp, "%s ", fc.name[i]);
